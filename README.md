@@ -58,5 +58,5 @@ credentials.
 - [x] **ecs-cluster + reusable ecs-service + alb** + backend on Fargate
 - [x] **mqtt-broker (Mosquitto on Fargate + NLB) + dns** (Route53 zone + wildcard ACM, disabled without a domain)
 - [x] **cdn (reusable S3/CloudFront + OAC) + observability** (CloudWatch dashboard + 5 alarms + SNS)
-- [ ] GitHub → AWS OIDC + reusable deploy workflow (test → image → ECR → ECS)
+- [x] **GitHub → AWS OIDC** + `tf.yml` (plan on PR, apply on push to main); reusable `deploy-ecs` in smart-pet-ci
 - [ ] `prod` env + scale settings
