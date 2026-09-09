@@ -54,7 +54,7 @@ credentials.
 ## Slices
 
 - [x] **foundation** — bootstrap, `modules/network`, `envs/dev`, CI (this PR)
-- [ ] database + secrets + ecr
+- [x] **database + secrets + ecr** — RDS Postgres (RDS-managed master pw), app secret container, ECR repos
 - [ ] ecs-cluster + reusable ecs-service + alb + backend service
 - [ ] mqtt-broker (Mosquitto) + dns
 - [ ] cdn (S3/CloudFront) + observability
