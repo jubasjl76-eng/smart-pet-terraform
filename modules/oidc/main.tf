@@ -19,6 +19,11 @@ terraform {
 }
 
 variable "environment" { type = string }
+variable "create_provider" {
+  description = "The GitHub OIDC provider is account-global. One env creates it (true); the others look it up (false)."
+  type        = bool
+  default     = true
+}
 variable "github_org" {
   type    = string
   default = "jubasjl76-eng"
@@ -48,10 +53,20 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 resource "aws_iam_openid_connect_provider" "github" {
+  count           = var.create_provider ? 1 : 0
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
   tags            = var.tags
+}
+
+data "aws_iam_openid_connect_provider" "github" {
+  count = var.create_provider ? 0 : 1
+  url   = "https://token.actions.githubusercontent.com"
+}
+
+locals {
+  provider_arn = var.create_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
 }
 
 # ── terraform role ─────────────────────────────────────────────────────────
@@ -60,7 +75,7 @@ data "aws_iam_policy_document" "tf_assume" {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.provider_arn]
     }
     condition {
       test     = "StringEquals"
@@ -99,7 +114,7 @@ data "aws_iam_policy_document" "deploy_assume" {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.provider_arn]
     }
     condition {
       test     = "StringEquals"
@@ -165,7 +180,7 @@ resource "aws_iam_role_policy" "deploy" {
 }
 
 output "provider_arn" {
-  value = aws_iam_openid_connect_provider.github.arn
+  value = local.provider_arn
 }
 output "terraform_role_arn" {
   value = aws_iam_role.terraform.arn

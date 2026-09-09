@@ -59,4 +59,4 @@ credentials.
 - [x] **mqtt-broker (Mosquitto on Fargate + NLB) + dns** (Route53 zone + wildcard ACM, disabled without a domain)
 - [x] **cdn (reusable S3/CloudFront + OAC) + observability** (CloudWatch dashboard + 5 alarms + SNS)
 - [x] **GitHub → AWS OIDC** + `tf.yml` (plan on PR, apply on push to main); reusable `deploy-ecs` in smart-pet-ci
-- [ ] `prod` env + scale settings
+- [x] **`envs/prod`** — Multi-AZ RDS, NAT/AZ, backend ×2 (2–6), broker ×2, deletion protection; oidc.create_provider=false
