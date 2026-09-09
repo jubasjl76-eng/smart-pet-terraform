@@ -19,6 +19,12 @@ variable "region" {
   default = "eu-west-1"
 }
 
+variable "zone_name" {
+  description = "Route53 zone for api./mqtt. records + ACM. \"\" = HTTP/plain, no DNS (dev default)."
+  type        = string
+  default     = ""
+}
+
 module "network" {
   source      = "../../modules/network"
   project     = "smart-pet"
@@ -64,12 +70,19 @@ resource "aws_vpc_security_group_ingress_rule" "db_from_backend" {
   referenced_security_group_id = module.backend.security_group_id
 }
 
+module "dns" {
+  source      = "../../modules/dns"
+  zone_name   = var.zone_name # "" in dev → disabled, empty outputs
+  create_zone = false
+  tags        = local.tags
+}
+
 module "alb" {
   source            = "../../modules/alb"
   environment       = local.environment
   vpc_id            = module.network.vpc_id
   public_subnet_ids = module.network.public_subnet_ids
-  certificate_arn   = "" # dev: HTTP on :80 (no domain yet); dns slice adds ACM
+  certificate_arn   = module.dns.certificate_arn # "" → HTTP :80
   tags              = local.tags
 }
 
@@ -120,8 +133,63 @@ module "backend" {
   tags = local.tags
 }
 
+module "mqtt_broker" {
+  source             = "../../modules/mqtt-broker"
+  environment        = local.environment
+  region             = var.region
+  vpc_id             = module.network.vpc_id
+  public_subnet_ids  = module.network.public_subnet_ids
+  private_subnet_ids = module.network.private_subnet_ids
+  cluster_arn        = module.ecs_cluster.cluster_arn
+  cluster_name       = module.ecs_cluster.cluster_name
+  execution_role_arn = module.ecs_cluster.execution_role_arn
+  certificate_arn    = module.dns.certificate_arn # "" → plain :1883 only
+  # dev: Mosquitto, anonymous, reachable from anywhere. prod swaps the image
+  # for one with an auth backend and locks allowed_cidrs to the edge bridges.
+  dev_allow_anonymous = true
+  tags                = local.tags
+}
+
+# Backend → broker (publish siren/relay commands, subscribe device topics).
+resource "aws_vpc_security_group_ingress_rule" "mqtt_from_backend" {
+  security_group_id            = module.mqtt_broker.security_group_id
+  from_port                    = 1883
+  to_port                      = 1883
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = module.backend.security_group_id
+}
+
+# ── DNS records (only when a zone is configured) ──────────────────────────
+resource "aws_route53_record" "api" {
+  count   = var.zone_name == "" ? 0 : 1
+  zone_id = module.dns.zone_id
+  name    = "api.${var.zone_name}"
+  type    = "A"
+  alias {
+    name                   = module.alb.dns_name
+    zone_id                = module.alb.zone_id
+    evaluate_target_health = true
+  }
+}
+
+resource "aws_route53_record" "mqtt" {
+  count   = var.zone_name == "" ? 0 : 1
+  zone_id = module.dns.zone_id
+  name    = "mqtt.${var.zone_name}"
+  type    = "A"
+  alias {
+    name                   = module.mqtt_broker.nlb_dns_name
+    zone_id                = module.mqtt_broker.nlb_zone_id
+    evaluate_target_health = true
+  }
+}
+
 output "vpc_id" {
   value = module.network.vpc_id
+}
+
+output "mqtt_endpoint" {
+  value = module.mqtt_broker.endpoint_plain
 }
 
 output "ecr_repository_urls" {
