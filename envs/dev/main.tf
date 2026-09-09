@@ -29,8 +29,51 @@ module "network" {
   tags        = local.tags
 }
 
+module "secrets" {
+  source      = "../../modules/secrets"
+  environment = local.environment
+  tags        = local.tags
+}
+
+module "ecr" {
+  source = "../../modules/ecr"
+  tags   = local.tags
+}
+
+module "database" {
+  source             = "../../modules/database"
+  environment        = local.environment
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+
+  instance_class      = "db.t4g.micro"
+  multi_az            = false
+  deletion_protection = false
+  skip_final_snapshot = true
+  # dev: reachable from anything in the VPC until the backend SG exists (ecs slice)
+  allowed_cidr_blocks = [module.network.vpc_cidr]
+
+  tags = local.tags
+}
+
 output "vpc_id" {
   value = module.network.vpc_id
+}
+
+output "ecr_repository_urls" {
+  value = module.ecr.repository_urls
+}
+
+output "db_address" {
+  value = module.database.address
+}
+
+output "db_master_secret_arn" {
+  value = module.database.master_user_secret_arn
+}
+
+output "app_secret_arn" {
+  value = module.secrets.app_secret_arn
 }
 
 output "private_subnet_ids" {
