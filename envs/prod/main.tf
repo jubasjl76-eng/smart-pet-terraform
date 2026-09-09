@@ -203,29 +203,20 @@ module "sensors" {
   path_patterns         = ["/api/sensors*", "/api/alerts*"]
   health_check_path     = "/health"
 
+  # sensors-service forwards to the backend API (no DB of its own).
   environment_vars = {
-    NODE_ENV    = "production"
-    PORT        = "3005"
-    PG_HOST     = module.database.address
-    PG_PORT     = "5432"
-    PG_DATABASE = module.database.db_name
-    MQTT_HOST   = module.mqtt_broker.nlb_dns_name
-    MQTT_PORT   = "1883"
+    NODE_ENV           = "production"
+    PORT               = "3005"
+    MQTT_HOST          = module.mqtt_broker.nlb_dns_name
+    MQTT_PORT          = "1883"
+    CLOUD_BACKEND_URL  = var.zone_name == "" ? "http://${module.alb.dns_name}/api" : "https://api.${var.zone_name}/api"
+    OFFLINE_QUEUE_FILE = "/tmp/offline-queue.json"
   }
   secret_refs = {
-    PG_USER     = "${module.database.master_user_secret_arn}:username::"
-    PG_PASSWORD = "${module.database.master_user_secret_arn}:password::"
+    API_KEY = "${module.secrets.app_secret_arn}:SENSORS_API_KEY::"
   }
 
   tags = local.tags
-}
-
-resource "aws_vpc_security_group_ingress_rule" "db_from_sensors" {
-  security_group_id            = module.database.security_group_id
-  from_port                    = 5432
-  to_port                      = 5432
-  ip_protocol                  = "tcp"
-  referenced_security_group_id = module.sensors.security_group_id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "mqtt_from_sensors" {
