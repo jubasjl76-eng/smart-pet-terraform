@@ -211,3 +211,7 @@ output "target_group_arn" { value = aws_lb_target_group.this.arn }
 output "service_name" { value = aws_ecs_service.this.name }
 output "task_role_arn" { value = aws_iam_role.task.arn }
 output "log_group" { value = aws_cloudwatch_log_group.this.name }
+
+output "target_group_arn_suffix" {
+  value = aws_lb_target_group.this.arn_suffix
+}

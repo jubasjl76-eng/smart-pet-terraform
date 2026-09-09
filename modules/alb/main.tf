@@ -129,3 +129,7 @@ output "security_group_id" { value = aws_security_group.this.id }
 output "listener_arn" {
   value = local.https ? aws_lb_listener.https[0].arn : aws_lb_listener.http.arn
 }
+
+output "alb_arn_suffix" {
+  value = aws_lb.this.arn_suffix
+}

@@ -57,6 +57,6 @@ credentials.
 - [x] **database + secrets + ecr** — RDS Postgres (RDS-managed master pw), app secret container, ECR repos
 - [x] **ecs-cluster + reusable ecs-service + alb** + backend on Fargate
 - [x] **mqtt-broker (Mosquitto on Fargate + NLB) + dns** (Route53 zone + wildcard ACM, disabled without a domain)
-- [ ] cdn (S3/CloudFront) + observability
+- [x] **cdn (reusable S3/CloudFront + OAC) + observability** (CloudWatch dashboard + 5 alarms + SNS)
 - [ ] GitHub → AWS OIDC + reusable deploy workflow (test → image → ECR → ECS)
 - [ ] `prod` env + scale settings
