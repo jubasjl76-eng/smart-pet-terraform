@@ -56,7 +56,7 @@ credentials.
 - [x] **foundation** — bootstrap, `modules/network`, `envs/dev`, CI (this PR)
 - [x] **database + secrets + ecr** — RDS Postgres (RDS-managed master pw), app secret container, ECR repos
 - [x] **ecs-cluster + reusable ecs-service + alb** + backend on Fargate
-- [ ] mqtt-broker (Mosquitto) + dns
+- [x] **mqtt-broker (Mosquitto on Fargate + NLB) + dns** (Route53 zone + wildcard ACM, disabled without a domain)
 - [ ] cdn (S3/CloudFront) + observability
 - [ ] GitHub → AWS OIDC + reusable deploy workflow (test → image → ECR → ECS)
 - [ ] `prod` env + scale settings
