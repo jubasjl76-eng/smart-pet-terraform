@@ -25,6 +25,12 @@ variable "zone_name" {
   default     = ""
 }
 
+variable "alarm_email" {
+  description = "Email subscribed to the CloudWatch alarm topic. \"\" = topic only."
+  type        = string
+  default     = ""
+}
+
 module "network" {
   source      = "../../modules/network"
   project     = "smart-pet"
@@ -159,6 +165,35 @@ resource "aws_vpc_security_group_ingress_rule" "mqtt_from_backend" {
   referenced_security_group_id = module.backend.security_group_id
 }
 
+module "cdn_assets" {
+  source      = "../../modules/cdn"
+  name        = "assets" # hls/ firmware/ snapshots/ buyer-photos/
+  environment = local.environment
+  spa         = false
+  tags        = local.tags
+}
+
+module "cdn_dashboard" {
+  source      = "../../modules/cdn"
+  name        = "dashboard"
+  environment = local.environment
+  spa         = true # 403/404 → /index.html
+  tags        = local.tags
+}
+
+module "observability" {
+  source                  = "../../modules/observability"
+  environment             = local.environment
+  region                  = var.region
+  alb_arn_suffix          = module.alb.alb_arn_suffix
+  target_group_arn_suffix = module.backend.target_group_arn_suffix
+  cluster_name            = module.ecs_cluster.cluster_name
+  db_identifier           = module.database.identifier
+  backend_desired_count   = 1
+  alarm_email             = var.alarm_email
+  tags                    = local.tags
+}
+
 # ── DNS records (only when a zone is configured) ──────────────────────────
 resource "aws_route53_record" "api" {
   count   = var.zone_name == "" ? 0 : 1
@@ -222,4 +257,16 @@ output "alb_dns_name" {
 
 output "backend_log_group" {
   value = module.backend.log_group
+}
+
+output "cdn_dashboard_domain" {
+  value = module.cdn_dashboard.domain_name
+}
+
+output "cdn_assets_bucket" {
+  value = module.cdn_assets.bucket
+}
+
+output "alarm_topic_arn" {
+  value = module.observability.sns_topic_arn
 }
