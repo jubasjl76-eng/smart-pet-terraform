@@ -38,9 +38,9 @@ variable "host_header" {
   type        = string
   default     = "*"
 }
-variable "path_pattern" {
-  type    = string
-  default = "/*"
+variable "path_patterns" {
+  type    = list(string)
+  default = ["/*"]
 }
 variable "health_check_path" {
   type    = string
