@@ -177,6 +177,65 @@ resource "aws_vpc_security_group_ingress_rule" "mqtt_from_backend" {
   referenced_security_group_id = module.backend.security_group_id
 }
 
+
+module "sensors" {
+  source             = "../../modules/ecs-service"
+  name               = "sensors"
+  environment        = local.environment
+  region             = var.region
+  cluster_arn        = module.ecs_cluster.cluster_arn
+  cluster_name       = module.ecs_cluster.cluster_name
+  execution_role_arn = module.ecs_cluster.execution_role_arn
+
+  image          = "${module.ecr.repository_urls["sensors"]}:latest"
+  container_port = 3005
+  cpu            = 256
+  memory         = 512
+  desired_count  = 2
+  min_count      = 2
+  max_count      = 4
+
+  vpc_id                = module.network.vpc_id
+  private_subnet_ids    = module.network.private_subnet_ids
+  alb_security_group_id = module.alb.security_group_id
+  alb_listener_arn      = module.alb.listener_arn
+  listener_priority     = 50 # more specific than the backend's catch-all at 100
+  path_patterns         = ["/api/sensors*", "/api/alerts*"]
+  health_check_path     = "/health"
+
+  environment_vars = {
+    NODE_ENV    = "production"
+    PORT        = "3005"
+    PG_HOST     = module.database.address
+    PG_PORT     = "5432"
+    PG_DATABASE = module.database.db_name
+    MQTT_HOST   = module.mqtt_broker.nlb_dns_name
+    MQTT_PORT   = "1883"
+  }
+  secret_refs = {
+    PG_USER     = "${module.database.master_user_secret_arn}:username::"
+    PG_PASSWORD = "${module.database.master_user_secret_arn}:password::"
+  }
+
+  tags = local.tags
+}
+
+resource "aws_vpc_security_group_ingress_rule" "db_from_sensors" {
+  security_group_id            = module.database.security_group_id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = module.sensors.security_group_id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "mqtt_from_sensors" {
+  security_group_id            = module.mqtt_broker.security_group_id
+  from_port                    = 1883
+  to_port                      = 1883
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = module.sensors.security_group_id
+}
+
 module "cdn_assets" {
   source      = "../../modules/cdn"
   name        = "assets"
@@ -202,6 +261,7 @@ module "oidc" {
   ecr_repository_arns = module.ecr.repository_arns
   deploy_repos = {
     backend = { repo = "smart-pet-backend", ref = "ref:refs/tags/v*" }
+    sensors = { repo = "pet-iot-sensors-service", ref = "ref:refs/tags/v*" }
   }
   tags = local.tags
 }
