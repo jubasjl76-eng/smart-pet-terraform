@@ -1,1 +1,15 @@
 graphify-out/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+# never commit real var files with secrets; *.tfvars in envs/ are committed and safe
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

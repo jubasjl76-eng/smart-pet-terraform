@@ -1,109 +1,62 @@
-# Smart Pet Terraform
+# smart-pet-terraform
 
-Infrastructure as Code for the Smart Pet ecosystem.
+Infrastructure as code for the Smart Pet cloud (Phase 10). Rebuilt from the
+original single-EC2 toy (kept as `legacy/single-ec2.tf.txt`) into a
+module + per-environment layout.
 
-## What's Included
+## Layout
 
-- **VPC** - Virtual Private Cloud with public subnets
-- **EC2** - Single server for unified API
-- **Security Groups** - Firewall rules for API access
-- **Elastic IP** - Static public IP
-
-## Quick Start
-
-1. Install Terraform:
-```bash
-brew install terraform
+```
+bootstrap/          S3 state bucket + DynamoDB lock (run once, local state)
+modules/
+  network/          VPC · 2×AZ public+private subnets · IGW · NAT · S3 endpoint
+  ...               database, mqtt-broker, ecs-cluster, ecs-service, alb, cdn,
+                    dns, ecr, secrets, observability — added in later slices
+envs/
+  dev/              backend.tf (state key=dev) · main.tf · dev.tfvars
+  prod/             (later)
+.github/workflows/ci.yml   fmt + validate per stack
+legacy/             the pre-Phase-10 single-EC2 config, for reference only
 ```
 
-2. Configure AWS credentials:
-```bash
-aws configure
-```
+## First run
 
-3. Initialize:
 ```bash
-cd terraform
+cd bootstrap
 terraform init
+terraform apply            # creates smart-pet-tfstate + smart-pet-tflock
 ```
 
-4. Plan deployment:
+Then each environment uses the S3 backend:
+
 ```bash
-terraform plan
+cd envs/dev
+terraform init             # reads backend.tf
+terraform plan -var-file=dev.tfvars
+terraform apply -var-file=dev.tfvars
 ```
 
-5. Apply:
-```bash
-terraform apply
-```
+CI runs `terraform fmt -check -recursive` and, per stack,
+`terraform init -backend=false` + `terraform validate`. `terraform plan` in CI
+is off until GitHub → AWS OIDC is wired (the CI/CD slice); it needs real
+credentials.
 
-## Architecture
+## Environments
 
-```
-┌─────────────────────────────────────────────────┐
-│                    Internet                       │
-└─────────────────┬───────────────────────────────┘
-                  │
-            [Elastic IP]
-                  │
-        ┌─────────▼─────────┐
-        │   EC2 Instance    │
-        │  (t3.micro)       │
-        │                   │
-        │ ┌───────────────┐ │
-        │ │ Unified API   │ │
-        │ │ Port 3000     │ │
-        │ └───────────────┘ │
-        └─────────┬─────────┘
-                  │
-        ┌────────▼────────┐
-        │   VPC (10.0.0.0) │
-        │  Public Subnets   │
-        │  eu-west-1a/b    │
-        └──────────────────┘
-```
+| | `dev` | `prod` |
+|---|---|---|
+| VPC CIDR | `10.10.0.0/16` | `10.20.0.0/16` (later) |
+| NAT | one for the VPC | one per AZ |
+| RDS | `db.t4g.micro`, single-AZ | `db.t4g.small`+, Multi-AZ |
+| Broker | Mosquitto ×1 | EMQX ×2+ |
+| Backend | ×1 | ×2, autoscale 2–6 |
 
-## Services Deployed
+## Slices
 
-| Service | Port | Description |
-|---------|------|-------------|
-| Unified API | 3000 | All devices, schedules, events |
-
-## Variables
-
-Edit `terraform.tfvars`:
-
-```hcl
-aws_region    = "eu-west-1"
-project_name  = "smart-pet"
-environment   = "prod"
-instance_type = "t3.micro"
-```
-
-## Outputs
-
-After deployment:
-- `api_url` - Full API URL
-- `api_server_ip` - Server IP
-- `health_endpoint` - Health check URL
-
-## Cost Estimate
-
-- EC2 t3.micro: ~$8/month
-- Elastic IP: Free
-- Data transfer: ~$1/month
-
-**Total: ~$9/month**
-
-## Future Scaling
-
-For production with high load:
-1. Add Application Load Balancer
-2. Use AWS Fargate or EKS
-3. Add RDS for persistent storage
-4. Add CloudFront CDN
-5. Set up Auto Scaling
-
-## License
-
-MIT
+- [x] **foundation** — bootstrap, `modules/network`, `envs/dev`, CI (this PR)
+- [ ] database + secrets + ecr
+- [ ] ecs-cluster + reusable ecs-service + alb + backend service
+- [ ] mqtt-broker (Mosquitto) + dns
+- [ ] cdn (S3/CloudFront) + observability
+- [ ] GitHub → AWS OIDC + reusable deploy workflow (test → image → ECR → ECS)
+- [ ] `prod` env + scale settings

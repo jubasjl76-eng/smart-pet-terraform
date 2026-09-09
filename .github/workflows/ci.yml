@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+
+jobs:
+  # fmt across the whole repo (modules + bootstrap + envs)
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - run: terraform fmt -check -recursive
+
+  # init -backend=false + validate per stack
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [bootstrap, envs/dev]
+    uses: jubasjl76-eng/smart-pet-ci/.github/workflows/terraform-ci.yml@main
+    with:
+      working-directory: ${{ matrix.stack }}
+      # run-plan stays false until AWS OIDC / creds are wired (CI/CD slice)
