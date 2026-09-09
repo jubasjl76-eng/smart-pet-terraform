@@ -66,6 +66,17 @@ module "database" {
   tags = local.tags
 }
 
+# Redis — off in dev; services fall back to in-memory. The module + wiring exist
+# so Phase 20 only flips `enabled` in staging/prod. redis_url is "" when disabled.
+module "cache" {
+  source             = "../../modules/cache"
+  environment        = local.environment
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+  enabled            = false
+  tags               = local.tags
+}
+
 # Backend service → Postgres. A standalone rule (not passed into module.database)
 # so there is no module-level cycle: database → backend SG → backend → database.
 resource "aws_vpc_security_group_ingress_rule" "db_from_backend" {
@@ -121,7 +132,7 @@ module "backend" {
   alb_security_group_id = module.alb.security_group_id
   alb_listener_arn      = module.alb.listener_arn
   listener_priority     = 100
-  health_check_path     = "/health"
+  health_check_path     = "/ready"
 
   environment_vars = {
     NODE_ENV    = "production"
@@ -129,6 +140,7 @@ module "backend" {
     PG_HOST     = module.database.address
     PG_PORT     = "5432"
     PG_DATABASE = module.database.db_name
+    REDIS_URL   = module.cache.redis_url
   }
   secret_refs = {
     JWT_SECRET  = "${module.secrets.app_secret_arn}:JWT_SECRET::"
@@ -189,7 +201,7 @@ module "sensors" {
   alb_listener_arn      = module.alb.listener_arn
   listener_priority     = 50 # more specific than the backend's catch-all at 100
   path_patterns         = ["/api/sensors*", "/api/alerts*"]
-  health_check_path     = "/health"
+  health_check_path     = "/ready"
 
   # sensors-service forwards to the backend API (no DB of its own).
   environment_vars = {
