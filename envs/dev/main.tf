@@ -181,6 +181,16 @@ module "cdn_dashboard" {
   tags        = local.tags
 }
 
+module "oidc" {
+  source              = "../../modules/oidc"
+  environment         = local.environment
+  ecr_repository_arns = module.ecr.repository_arns
+  deploy_repos = {
+    backend = { repo = "smart-pet-backend", ref = "ref:refs/heads/development" }
+  }
+  tags = local.tags
+}
+
 module "observability" {
   source                  = "../../modules/observability"
   environment             = local.environment
@@ -269,4 +279,12 @@ output "cdn_assets_bucket" {
 
 output "alarm_topic_arn" {
   value = module.observability.sns_topic_arn
+}
+
+output "gha_terraform_role_arn" {
+  value = module.oidc.terraform_role_arn
+}
+
+output "gha_deploy_role_arns" {
+  value = module.oidc.deploy_role_arns
 }

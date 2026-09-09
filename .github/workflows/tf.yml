@@ -1,0 +1,51 @@
+name: tf
+
+# plan on PR, apply on push to main. Uses GitHub → AWS OIDC (no static keys):
+# set the repo variables AWS_ROLE_ARN (module.oidc.gha_terraform_role_arn) and
+# AWS_REGION after the first bootstrap + apply. Until then this self-skips.
+
+on:
+  pull_request:
+    paths: ["**.tf", "**.tfvars", ".github/workflows/tf.yml"]
+  push:
+    branches: [main]
+    paths: ["**.tf", "**.tfvars", ".github/workflows/tf.yml"]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+    steps:
+      - id: g
+        env:
+          ROLE: ${{ vars.AWS_ROLE_ARN }}
+        run: |
+          if [ -n "$ROLE" ]; then echo "run=true" >> "$GITHUB_OUTPUT"
+          else echo "run=false" >> "$GITHUB_OUTPUT"; echo "::notice::AWS_ROLE_ARN not set — skipping plan/apply."; fi
+
+  plan-apply:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: envs/dev
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: terraform init -input=false
+      - run: terraform plan -input=false -lock-timeout=120s
+      - name: apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -input=false -auto-approve -lock-timeout=120s
