@@ -1,5 +1,5 @@
 locals {
-  environment = "prod"
+  environment = "staging"
   tags = {
     Project     = "smart-pet"
     Environment = local.environment
@@ -20,7 +20,7 @@ variable "region" {
 }
 
 variable "zone_name" {
-  description = "Route53 zone for api./mqtt. + regional ACM. \"\" = HTTP/plain (fine to bring up first, add the domain later)."
+  description = "Route53 zone for api./mqtt. + regional ACM. \"\" = HTTP/plain."
   type        = string
   default     = ""
 }
@@ -36,18 +36,21 @@ variable "alarm_email" {
 }
 
 variable "broker_image" {
-  description = "prod broker image with an auth backend. Default rejects all clients (allow_anonymous=false, no password file)."
+  description = "staging broker image with an auth backend."
   type        = string
   default     = "eclipse-mosquitto:2"
 }
+
+# staging = prod topology, minimal sizing. Single NAT, single-AZ DB, one broker,
+# one task per service, Redis without a replica.
 
 module "network" {
   source      = "../../modules/network"
   project     = "smart-pet"
   environment = local.environment
   region      = var.region
-  vpc_cidr    = "10.20.0.0/16"
-  single_nat  = false # prod: one NAT per AZ
+  vpc_cidr    = "10.30.0.0/16"
+  single_nat  = true
   tags        = local.tags
 }
 
@@ -68,14 +71,14 @@ module "database" {
   vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
 
-  instance_class          = "db.t4g.small"
-  allocated_storage       = 50
-  max_allocated_storage   = 200
-  multi_az                = true
-  deletion_protection     = true
-  skip_final_snapshot     = false
-  backup_retention_period = 14
-  performance_insights    = true
+  instance_class          = "db.t4g.micro"
+  allocated_storage       = 20
+  max_allocated_storage   = 100
+  multi_az                = false
+  deletion_protection     = false
+  skip_final_snapshot     = true
+  backup_retention_period = 7
+  performance_insights    = false
 
   tags = local.tags
 }
@@ -94,7 +97,7 @@ module "cache" {
   vpc_id                     = module.network.vpc_id
   private_subnet_ids         = module.network.private_subnet_ids
   enabled                    = true
-  replicas                   = 1 # Multi-AZ automatic failover
+  replicas                   = 0
   allowed_security_group_ids = [module.backend.security_group_id, module.sensors.security_group_id]
   tags                       = local.tags
 }
@@ -112,7 +115,7 @@ module "alb" {
   vpc_id                     = module.network.vpc_id
   public_subnet_ids          = module.network.public_subnet_ids
   certificate_arn            = module.dns.certificate_arn
-  enable_deletion_protection = true
+  enable_deletion_protection = false
   tags                       = local.tags
 }
 
@@ -134,11 +137,11 @@ module "backend" {
 
   image          = "${module.ecr.repository_urls["backend"]}:latest"
   container_port = 3000
-  cpu            = 1024
-  memory         = 2048
-  desired_count  = 2
-  min_count      = 2
-  max_count      = 6
+  cpu            = 512
+  memory         = 1024
+  desired_count  = 1
+  min_count      = 1
+  max_count      = 2
 
   vpc_id                = module.network.vpc_id
   private_subnet_ids    = module.network.private_subnet_ids
@@ -148,7 +151,7 @@ module "backend" {
   health_check_path     = "/ready"
 
   environment_vars = {
-    NODE_ENV    = "production"
+    NODE_ENV    = "staging"
     PORT        = "3000"
     PG_HOST     = module.database.address
     PG_PORT     = "5432"
@@ -176,8 +179,8 @@ module "mqtt_broker" {
   execution_role_arn  = module.ecs_cluster.execution_role_arn
   certificate_arn     = module.dns.certificate_arn
   image               = var.broker_image
-  desired_count       = 2
-  dev_allow_anonymous = false # prod: the image must bring its own auth
+  desired_count       = 1
+  dev_allow_anonymous = false
   tags                = local.tags
 }
 
@@ -188,7 +191,6 @@ resource "aws_vpc_security_group_ingress_rule" "mqtt_from_backend" {
   ip_protocol                  = "tcp"
   referenced_security_group_id = module.backend.security_group_id
 }
-
 
 module "sensors" {
   source             = "../../modules/ecs-service"
@@ -203,21 +205,20 @@ module "sensors" {
   container_port = 3005
   cpu            = 256
   memory         = 512
-  desired_count  = 2
-  min_count      = 2
-  max_count      = 4
+  desired_count  = 1
+  min_count      = 1
+  max_count      = 2
 
   vpc_id                = module.network.vpc_id
   private_subnet_ids    = module.network.private_subnet_ids
   alb_security_group_id = module.alb.security_group_id
   alb_listener_arn      = module.alb.listener_arn
-  listener_priority     = 50 # more specific than the backend's catch-all at 100
+  listener_priority     = 50
   path_patterns         = ["/api/sensors*", "/api/alerts*"]
   health_check_path     = "/ready"
 
-  # sensors-service forwards to the backend API (no DB of its own).
   environment_vars = {
-    NODE_ENV           = "production"
+    NODE_ENV           = "staging"
     PORT               = "3005"
     MQTT_HOST          = module.mqtt_broker.nlb_dns_name
     MQTT_PORT          = "1883"
@@ -244,7 +245,7 @@ module "cdn_assets" {
   name        = "assets"
   environment = local.environment
   spa         = false
-  price_class = "PriceClass_200"
+  price_class = "PriceClass_100"
   tags        = local.tags
 }
 
@@ -253,7 +254,7 @@ module "cdn_dashboard" {
   name        = "dashboard"
   environment = local.environment
   spa         = true
-  price_class = "PriceClass_200"
+  price_class = "PriceClass_100"
   tags        = local.tags
 }
 
@@ -263,8 +264,8 @@ module "oidc" {
   create_provider     = false # dev's stack owns the account-global provider
   ecr_repository_arns = module.ecr.repository_arns
   deploy_repos = {
-    backend = { repo = "smart-pet-backend", ref = "ref:refs/tags/v*" }
-    sensors = { repo = "pet-iot-sensors-service", ref = "ref:refs/tags/v*" }
+    backend = { repo = "smart-pet-backend", ref = "ref:refs/tags/v*-rc.*" }
+    sensors = { repo = "pet-iot-sensors-service", ref = "ref:refs/tags/v*-rc.*" }
   }
   tags = local.tags
 }
@@ -277,7 +278,7 @@ module "observability" {
   target_group_arn_suffix = module.backend.target_group_arn_suffix
   cluster_name            = module.ecs_cluster.cluster_name
   db_identifier           = module.database.identifier
-  backend_desired_count   = 2
+  backend_desired_count   = 1
   alarm_email             = var.alarm_email
   tags                    = local.tags
 }
@@ -311,7 +312,7 @@ output "mqtt_endpoint" { value = module.mqtt_broker.endpoint_plain }
 output "ecr_repository_urls" { value = module.ecr.repository_urls }
 output "db_address" { value = module.database.address }
 output "app_secret_arn" { value = module.secrets.app_secret_arn }
-output "cdn_dashboard_domain" { value = module.cdn_dashboard.domain_name }
 output "redis_url" { value = module.cache.redis_url }
+output "cdn_dashboard_domain" { value = module.cdn_dashboard.domain_name }
 output "gha_deploy_role_arns" { value = module.oidc.deploy_role_arns }
 output "gha_terraform_role_arn" { value = module.oidc.terraform_role_arn }

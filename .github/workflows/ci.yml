@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stack: [bootstrap, envs/dev, envs/prod]
+        stack: [bootstrap, envs/dev, envs/staging, envs/prod]
     uses: jubasjl76-eng/smart-pet-ci/.github/workflows/terraform-ci.yml@main
     with:
       working-directory: ${{ matrix.stack }}

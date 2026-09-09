@@ -60,3 +60,9 @@ credentials.
 - [x] **cdn (reusable S3/CloudFront + OAC) + observability** (CloudWatch dashboard + 5 alarms + SNS)
 - [x] **GitHub → AWS OIDC** + `tf.yml` (plan on PR, apply on push to main); reusable `deploy-ecs` in smart-pet-ci
 - [x] **`envs/prod`** — Multi-AZ RDS, NAT/AZ, backend ×2 (2–6), broker ×2, deletion protection; oidc.create_provider=false
+
+### Hardening Phase 12
+
+- [x] **`modules/cache` (ElastiCache Redis)** — `enabled` toggle: off in dev (in-memory fallback), on in staging (0 replicas) + prod (1 replica, Multi-AZ failover). Outputs `redis_url` (`rediss://…`, `""` when disabled). Dormant until Phase 20.
+- [x] **`envs/staging`** — prod topology, minimal sizing (single NAT, single-AZ `db.t4g.micro`, one broker, one task/service). State key `staging`. OIDC deploy trust `refs/tags/v*-rc.*`.
+- [x] **ALB health check → `/ready`** — backend + sensors target groups + the container healthcheck point at `/ready` (implemented in every service in Phase 12 slices 2–3); `/health` stays pure liveness.
