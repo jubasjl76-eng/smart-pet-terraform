@@ -1,0 +1,26 @@
+# Local .terraform working dirs (provider/module caches — can be hundreds of MB)
+**/.terraform/*
+
+# State and any local plan output
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Override files (local-only overrides)
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI config that may hold credentials
+.terraformrc
+terraform.rc
+
+# Transient tool output
+graphify-out/
+
+# NOTE: .terraform.lock.hcl IS committed on purpose (provider version pinning).
+# NOTE: *.tfvars is NOT ignored — envs/*/*.tfvars here only set `region` and are
+#       tracked. Add specific secret-bearing tfvars by name if that ever changes.
