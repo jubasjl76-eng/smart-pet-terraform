@@ -1,0 +1,20 @@
+name: Security
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+  schedule:
+    - cron: '12 6 * * 1' # Mondays, feeds the weekly report
+
+# The reusable workflow uploads SARIF — the caller must grant this; a called
+# workflow can only narrow permissions, never add them.
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  security:
+    uses: jubasjl76-eng/smart-pet-ci/.github/workflows/security-scan.yml@main
+    with:
+      node: false
+      iac: true
