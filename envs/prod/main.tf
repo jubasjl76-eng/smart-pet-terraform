@@ -76,8 +76,27 @@ module "database" {
   skip_final_snapshot     = false
   backup_retention_period = 14
   performance_insights    = true
+  # t4g.small comfortably supports more than the module's micro-sized
+  # default (80) — RDS's own ceiling here is ~225.
+  max_connections = 150
 
   tags = local.tags
+}
+
+# Pool sizing (hardening Phase 20, A12 #1) — the backend's pg.Pool `max` +
+# pg-boss's own separate pool, computed from the DB's actual max_connections
+# and this env's instance ceiling (×6 at peak — the scale the hardening plan
+# calls out RDS Proxy for; this arithmetic is what keeps ×6 safe without it
+# at this project's actual load). Reserves headroom for RDS's own overhead +
+# an operator's direct psql session.
+locals {
+  backend_max_count = 6
+  pg_boss_pool_max  = 5
+  pg_pool_reserve   = 10
+  pg_pool_max = max(
+    1,
+    floor(module.database.max_connections / local.backend_max_count) - local.pg_pool_reserve - local.pg_boss_pool_max,
+  )
 }
 
 resource "aws_vpc_security_group_ingress_rule" "db_from_backend" {
@@ -138,7 +157,7 @@ module "backend" {
   memory         = 2048
   desired_count  = 2
   min_count      = 2
-  max_count      = 6
+  max_count      = local.backend_max_count
 
   vpc_id                = module.network.vpc_id
   private_subnet_ids    = module.network.private_subnet_ids
@@ -148,12 +167,14 @@ module "backend" {
   health_check_path     = "/ready"
 
   environment_vars = {
-    NODE_ENV    = "production"
-    PORT        = "3000"
-    PG_HOST     = module.database.address
-    PG_PORT     = "5432"
-    PG_DATABASE = module.database.db_name
-    REDIS_URL   = module.cache.redis_url
+    NODE_ENV         = "production"
+    PORT             = "3000"
+    PG_HOST          = module.database.address
+    PG_PORT          = "5432"
+    PG_DATABASE      = module.database.db_name
+    PG_POOL_MAX      = tostring(local.pg_pool_max)
+    PG_BOSS_POOL_MAX = tostring(local.pg_boss_pool_max)
+    REDIS_URL        = module.cache.redis_url
   }
   secret_refs = {
     JWT_SECRET  = "${module.secrets.app_secret_arn}:JWT_SECRET::"

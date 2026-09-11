@@ -82,6 +82,22 @@ variable "performance_insights" {
   default = false
 }
 
+# Pool sizing (hardening Phase 20, A12 #1). Set explicitly rather than left to
+# RDS's auto-computed default (derived from instance memory) so the exact
+# number is known in Terraform — callers use it (÷ instance count, with
+# headroom) to size each service's pg.Pool `max`, instead of guessing.
+variable "max_connections" {
+  description = "Postgres max_connections. RDS's own default for db.t4g.micro/small is ~112/225; set below that for headroom (RDS reserves some for itself, superuser, monitoring)."
+  type        = number
+  default     = 80
+}
+
+variable "statement_timeout_ms" {
+  description = "Server-side query timeout (defense in depth alongside the app's own PG_STATEMENT_TIMEOUT_MS). 0 = no limit."
+  type        = number
+  default     = 30000
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
