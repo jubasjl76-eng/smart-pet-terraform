@@ -211,6 +211,7 @@ module "sensors" {
     MQTT_PORT          = "1883"
     CLOUD_BACKEND_URL  = "http://${module.alb.dns_name}/api"
     OFFLINE_QUEUE_FILE = "/tmp/offline-queue.json"
+    REDIS_URL          = module.cache.redis_url # "" — cache module is disabled in dev
   }
   secret_refs = {
     API_KEY = "${module.secrets.app_secret_arn}:SENSORS_API_KEY::"
