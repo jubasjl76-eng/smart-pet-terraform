@@ -83,6 +83,20 @@ module "database" {
   tags = local.tags
 }
 
+# Pool sizing (hardening Phase 20, A12 #1) — the backend's pg.Pool `max` +
+# pg-boss's own separate pool, computed from the DB's actual max_connections
+# and this env's instance ceiling rather than guessed. Reserves headroom for
+# RDS's own overhead + an operator's direct psql session.
+locals {
+  backend_max_count = 2
+  pg_boss_pool_max  = 5
+  pg_pool_reserve   = 10
+  pg_pool_max = max(
+    1,
+    floor(module.database.max_connections / local.backend_max_count) - local.pg_pool_reserve - local.pg_boss_pool_max,
+  )
+}
+
 resource "aws_vpc_security_group_ingress_rule" "db_from_backend" {
   security_group_id            = module.database.security_group_id
   from_port                    = 5432
@@ -141,7 +155,7 @@ module "backend" {
   memory         = 1024
   desired_count  = 1
   min_count      = 1
-  max_count      = 2
+  max_count      = local.backend_max_count
 
   vpc_id                = module.network.vpc_id
   private_subnet_ids    = module.network.private_subnet_ids
@@ -151,12 +165,14 @@ module "backend" {
   health_check_path     = "/ready"
 
   environment_vars = {
-    NODE_ENV    = "staging"
-    PORT        = "3000"
-    PG_HOST     = module.database.address
-    PG_PORT     = "5432"
-    PG_DATABASE = module.database.db_name
-    REDIS_URL   = module.cache.redis_url
+    NODE_ENV         = "staging"
+    PORT             = "3000"
+    PG_HOST          = module.database.address
+    PG_PORT          = "5432"
+    PG_DATABASE      = module.database.db_name
+    PG_POOL_MAX      = tostring(local.pg_pool_max)
+    PG_BOSS_POOL_MAX = tostring(local.pg_boss_pool_max)
+    REDIS_URL        = module.cache.redis_url
   }
   secret_refs = {
     JWT_SECRET  = "${module.secrets.app_secret_arn}:JWT_SECRET::"

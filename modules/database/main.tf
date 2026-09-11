@@ -53,6 +53,20 @@ resource "aws_db_parameter_group" "this" {
     name  = "rds.force_ssl"
     value = "1"
   }
+  # max_connections is a static parameter — a change needs an instance
+  # reboot to take effect (RDS applies it at the next maintenance window, or
+  # immediately with an operator-triggered reboot).
+  parameter {
+    name         = "max_connections"
+    value        = var.max_connections
+    apply_method = "pending-reboot"
+  }
+  # statement_timeout is dynamic — applies to new connections immediately,
+  # no reboot needed.
+  parameter {
+    name  = "statement_timeout"
+    value = var.statement_timeout_ms
+  }
   tags = var.tags
 }
 

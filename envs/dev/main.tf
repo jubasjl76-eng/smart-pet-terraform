@@ -66,6 +66,19 @@ module "database" {
   tags = local.tags
 }
 
+# Pool sizing (hardening Phase 20, A12 #1) — same formula as staging/prod, for
+# consistency; dev rarely runs above desired_count=1 so this mostly documents
+# the pattern rather than protecting against real pressure here.
+locals {
+  backend_max_count = 3
+  pg_boss_pool_max  = 5
+  pg_pool_reserve   = 10
+  pg_pool_max = max(
+    1,
+    floor(module.database.max_connections / local.backend_max_count) - local.pg_pool_reserve - local.pg_boss_pool_max,
+  )
+}
+
 # Redis — off in dev; services fall back to in-memory. The module + wiring exist
 # so Phase 20 only flips `enabled` in staging/prod. redis_url is "" when disabled.
 module "cache" {
@@ -125,7 +138,7 @@ module "backend" {
   memory         = 1024
   desired_count  = 1
   min_count      = 1
-  max_count      = 3
+  max_count      = local.backend_max_count
 
   vpc_id                = module.network.vpc_id
   private_subnet_ids    = module.network.private_subnet_ids
@@ -135,12 +148,14 @@ module "backend" {
   health_check_path     = "/ready"
 
   environment_vars = {
-    NODE_ENV    = "production"
-    PORT        = "3000"
-    PG_HOST     = module.database.address
-    PG_PORT     = "5432"
-    PG_DATABASE = module.database.db_name
-    REDIS_URL   = module.cache.redis_url
+    NODE_ENV         = "production"
+    PORT             = "3000"
+    PG_HOST          = module.database.address
+    PG_PORT          = "5432"
+    PG_DATABASE      = module.database.db_name
+    PG_POOL_MAX      = tostring(local.pg_pool_max)
+    PG_BOSS_POOL_MAX = tostring(local.pg_boss_pool_max)
+    REDIS_URL        = module.cache.redis_url
   }
   secret_refs = {
     JWT_SECRET  = "${module.secrets.app_secret_arn}:JWT_SECRET::"
