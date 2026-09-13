@@ -98,6 +98,11 @@ resource "aws_db_instance" "this" {
   skip_final_snapshot        = var.skip_final_snapshot
   final_snapshot_identifier  = var.skip_final_snapshot ? null : "${local.name}-final"
 
+  # Postgres has no separate "error log" export — "postgresql" carries
+  # everything logged by log_* parameters; "upgrade" covers major/minor
+  # engine upgrades.
+  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+
   performance_insights_enabled = var.performance_insights
   tags                         = var.tags
 }
@@ -123,6 +128,8 @@ resource "aws_db_instance" "replica" {
   # A replica is disposable relative to the primary — the data lives there.
   skip_final_snapshot = true
   deletion_protection = false
+
+  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
 
   performance_insights_enabled = var.performance_insights
   tags                         = var.tags
