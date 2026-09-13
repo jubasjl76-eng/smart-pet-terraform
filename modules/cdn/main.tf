@@ -69,6 +69,17 @@ resource "aws_s3_bucket" "this" {
   tags   = var.tags
 }
 
+# Versioning (Phase 21, A12 #19 — backup & DR): protects against an
+# accidental overwrite/delete regardless of DR, and is a hard prerequisite
+# for cross-region replication (envs/prod wires CRR onto the `assets`
+# instance of this module — see envs/prod/main.tf).
+resource "aws_s3_bucket_versioning" "this" {
+  bucket = aws_s3_bucket.this.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "this" {
   bucket                  = aws_s3_bucket.this.id
   block_public_acls       = true

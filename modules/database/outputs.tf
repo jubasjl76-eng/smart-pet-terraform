@@ -24,6 +24,10 @@ output "identifier" {
   value = aws_db_instance.this.identifier
 }
 
+output "arn" {
+  value = aws_db_instance.this.arn
+}
+
 # So callers can compute each service's pg.Pool `max` as
 # floor(max_connections / instance count) - headroom, instead of guessing.
 output "max_connections" {

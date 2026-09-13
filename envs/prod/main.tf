@@ -14,9 +14,26 @@ provider "aws" {
   }
 }
 
+# Backup & DR (Phase 21, A12 #19) — a second region for RDS automated-backup
+# replication + S3 cross-region replication of the assets bucket
+# (firmware/ + buyer-photos/). The first cross-region resources in this repo;
+# see runbooks/dr.md (smart-pet-docs) for the restore procedure + RTO/RPO.
+provider "aws" {
+  alias  = "dr"
+  region = var.dr_region
+  default_tags {
+    tags = local.tags
+  }
+}
+
 variable "region" {
   type    = string
   default = "eu-west-1"
+}
+
+variable "dr_region" {
+  type    = string
+  default = "eu-west-2"
 }
 
 variable "zone_name" {
@@ -89,6 +106,25 @@ module "database" {
   create_read_replica = true
 
   tags = local.tags
+}
+
+# Backup & DR (Phase 21, A12 #19) — automated backups (+ the PITR
+# transaction-log stream) replicate continuously to dr_region, so a restore
+# survives losing the whole primary region, not just the primary instance.
+# RPO stays RDS's own ~5min PITR granularity; RTO is a manual
+# `aws rds restore-db-instance-to-point-in-time` against the replicated copy
+# in dr_region — see runbooks/dr.md (smart-pet-docs) for the full procedure
+# and the quarterly restore-drill checklist.
+data "aws_kms_alias" "dr_rds" {
+  provider = aws.dr
+  name     = "alias/aws/rds"
+}
+
+resource "aws_db_instance_automated_backups_replication" "this" {
+  provider               = aws.dr
+  source_db_instance_arn = module.database.arn
+  kms_key_id             = data.aws_kms_alias.dr_rds.target_key_arn
+  retention_period       = 14 # matches module.database's backup_retention_period
 }
 
 # Pool sizing (hardening Phase 20, A12 #1) — the backend's pg.Pool `max` +
@@ -291,6 +327,106 @@ module "cdn_dashboard" {
   spa         = true
   price_class = "PriceClass_200"
   tags        = local.tags
+}
+
+# Backup & DR (Phase 21, A12 #19) — S3 cross-region replication for the
+# assets bucket (firmware/ + buyer-photos/). Firmware is already immutable
+# per-version (Phase 21, A11); this gives it — and buyer-photos — a live
+# copy in dr_region with no separate restore step. Dashboard/website assets
+# are rebuildable from source (the CI pipeline), so cdn_dashboard doesn't
+# need this.
+resource "aws_s3_bucket" "assets_dr" {
+  provider = aws.dr
+  bucket   = "smart-pet-${local.environment}-assets-dr"
+  tags     = local.tags
+}
+
+resource "aws_s3_bucket_versioning" "assets_dr" {
+  provider = aws.dr
+  bucket   = aws_s3_bucket.assets_dr.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "assets_dr" {
+  provider                = aws.dr
+  bucket                  = aws_s3_bucket.assets_dr.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "assets_dr" {
+  provider = aws.dr
+  bucket   = aws_s3_bucket.assets_dr.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+data "aws_iam_policy_document" "assets_replication_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["s3.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "assets_replication" {
+  name               = "smart-pet-${local.environment}-assets-replication"
+  assume_role_policy = data.aws_iam_policy_document.assets_replication_assume.json
+  tags               = local.tags
+}
+
+data "aws_iam_policy_document" "assets_replication" {
+  statement {
+    actions   = ["s3:GetReplicationConfiguration", "s3:ListBucket"]
+    resources = [module.cdn_assets.bucket_arn]
+  }
+  statement {
+    actions = [
+      "s3:GetObjectVersionForReplication",
+      "s3:GetObjectVersionAcl",
+      "s3:GetObjectVersionTagging",
+    ]
+    resources = ["${module.cdn_assets.bucket_arn}/*"]
+  }
+  statement {
+    actions   = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]
+    resources = ["${aws_s3_bucket.assets_dr.arn}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "assets_replication" {
+  name   = "replicate"
+  role   = aws_iam_role.assets_replication.id
+  policy = data.aws_iam_policy_document.assets_replication.json
+}
+
+resource "aws_s3_bucket_replication_configuration" "assets" {
+  # Versioning must exist on both sides before replication is configured —
+  # module.cdn_assets's own aws_s3_bucket_versioning (modules/cdn) covers the
+  # source; this depends_on covers the module boundary Terraform can't infer
+  # a reference across on its own.
+  depends_on = [module.cdn_assets, aws_s3_bucket_versioning.assets_dr]
+
+  bucket = module.cdn_assets.bucket
+  role   = aws_iam_role.assets_replication.arn
+
+  rule {
+    id     = "assets-to-dr"
+    status = "Enabled"
+    destination {
+      bucket        = aws_s3_bucket.assets_dr.arn
+      storage_class = "STANDARD"
+    }
+  }
 }
 
 module "oidc" {
