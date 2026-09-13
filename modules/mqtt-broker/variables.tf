@@ -45,6 +45,35 @@ variable "dev_allow_anonymous" {
   default     = true
 }
 
+# Abuse-prevention limits (Phase 20, A10) — what Mosquitto natively enforces.
+# See the comment above `local.conf` for what's deliberately NOT covered here
+# (per-client message/connection rate limiting — an EMQX-only capability).
+variable "max_connections" {
+  description = "Per-listener connection ceiling."
+  type        = number
+  default     = 1000
+}
+variable "max_queued_messages" {
+  description = "Per-client outgoing queue cap before Mosquitto starts dropping messages for that client."
+  type        = number
+  default     = 1000
+}
+variable "message_size_limit" {
+  description = "Max MQTT packet size in bytes. 0 = unlimited."
+  type        = number
+  default     = 8192
+}
+variable "max_keepalive" {
+  description = "Ceiling on a client-requested keepalive, in seconds."
+  type        = number
+  default     = 120
+}
+variable "alarm_topic_arn" {
+  description = "SNS topic for the client-limit-breach alarm. \"\" = no alarm (e.g. dev)."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
