@@ -358,13 +358,28 @@ resource "aws_s3_bucket_public_access_block" "assets_dr" {
   restrict_public_buckets = true
 }
 
+resource "aws_kms_key" "assets_dr" {
+  provider            = aws.dr
+  description         = "smart-pet-${local.environment} assets DR bucket"
+  enable_key_rotation = true
+  tags                = local.tags
+}
+
+resource "aws_kms_alias" "assets_dr" {
+  provider      = aws.dr
+  name          = "alias/smart-pet-${local.environment}-assets-dr"
+  target_key_id = aws_kms_key.assets_dr.key_id
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "assets_dr" {
   provider = aws.dr
   bucket   = aws_s3_bucket.assets_dr.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.assets_dr.arn
     }
+    bucket_key_enabled = true
   }
 }
 
@@ -401,6 +416,17 @@ data "aws_iam_policy_document" "assets_replication" {
     actions   = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]
     resources = ["${aws_s3_bucket.assets_dr.arn}/*"]
   }
+  # The destination bucket is encrypted with a customer-managed key — the
+  # replication role needs to use it, scoped to S3 doing so on its behalf.
+  statement {
+    actions   = ["kms:Encrypt", "kms:GenerateDataKey"]
+    resources = [aws_kms_key.assets_dr.arn]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.${var.dr_region}.amazonaws.com"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "assets_replication" {
@@ -414,7 +440,11 @@ resource "aws_s3_bucket_replication_configuration" "assets" {
   # module.cdn_assets's own aws_s3_bucket_versioning (modules/cdn) covers the
   # source; this depends_on covers the module boundary Terraform can't infer
   # a reference across on its own.
-  depends_on = [module.cdn_assets, aws_s3_bucket_versioning.assets_dr]
+  depends_on = [
+    module.cdn_assets,
+    aws_s3_bucket_versioning.assets_dr,
+    aws_s3_bucket_server_side_encryption_configuration.assets_dr,
+  ]
 
   bucket = module.cdn_assets.bucket
   role   = aws_iam_role.assets_replication.arn
