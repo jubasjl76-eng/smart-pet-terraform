@@ -101,3 +101,29 @@ resource "aws_db_instance" "this" {
   performance_insights_enabled = var.performance_insights
   tags                         = var.tags
 }
+
+# Read replica (Phase 21, A11/A12) — offloads exports / growth-chart
+# aggregation / GDPR export (smart-pet-backend's queryReplica()) so those
+# heavy, occasional reads don't compete with the primary's transactional
+# load. Most settings (engine, engine_version, db_name, master credentials)
+# are inherited from the source; only placement + sizing are set here.
+resource "aws_db_instance" "replica" {
+  count               = var.create_read_replica ? 1 : 0
+  identifier          = "${local.name}-replica"
+  replicate_source_db = aws_db_instance.this.identifier
+  instance_class      = coalesce(var.replica_instance_class, var.instance_class)
+
+  db_subnet_group_name       = aws_db_subnet_group.this.name
+  vpc_security_group_ids     = [aws_security_group.this.id]
+  parameter_group_name       = aws_db_parameter_group.this.name
+  publicly_accessible        = false
+  storage_type               = "gp3"
+  auto_minor_version_upgrade = true
+
+  # A replica is disposable relative to the primary — the data lives there.
+  skip_final_snapshot = true
+  deletion_protection = false
+
+  performance_insights_enabled = var.performance_insights
+  tags                         = var.tags
+}

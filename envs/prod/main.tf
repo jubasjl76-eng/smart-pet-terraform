@@ -80,6 +80,14 @@ module "database" {
   # default (80) — RDS's own ceiling here is ~225.
   max_connections = 150
 
+  # Read replica (Phase 21, A11/A12) — exports / growth-chart aggregation /
+  # GDPR export routed off the primary. Same instance class as the primary;
+  # a reporting replica here doesn't need to be bigger, and this is the only
+  # env that carries the real read load to justify a second always-on
+  # instance (dev/staging exercise the code path via its primary-pool
+  # fallback, not a live replica — matches Phase 20's RDS Proxy cost call).
+  create_read_replica = true
+
   tags = local.tags
 }
 
@@ -174,6 +182,7 @@ module "backend" {
     PG_DATABASE      = module.database.db_name
     PG_POOL_MAX      = tostring(local.pg_pool_max)
     PG_BOSS_POOL_MAX = tostring(local.pg_boss_pool_max)
+    PG_REPLICA_HOST  = module.database.replica_address
     REDIS_URL        = module.cache.redis_url
   }
   secret_refs = {
