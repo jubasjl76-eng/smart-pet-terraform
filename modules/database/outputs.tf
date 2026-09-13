@@ -29,3 +29,9 @@ output "identifier" {
 output "max_connections" {
   value = var.max_connections
 }
+
+# "" when create_read_replica is false — matches modules/cache's redis_url
+# pattern (an empty string the backend's config treats as unconfigured).
+output "replica_address" {
+  value = var.create_read_replica ? aws_db_instance.replica[0].address : ""
+}

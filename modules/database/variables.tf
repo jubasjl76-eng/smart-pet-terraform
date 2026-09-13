@@ -98,6 +98,20 @@ variable "statement_timeout_ms" {
   default     = 30000
 }
 
+# Read replica (Phase 21, A11/A12) for exports / growth-chart aggregation /
+# GDPR export — real ongoing AWS cost (a second always-on instance), off by
+# default; enable per env once that env actually has the read load to justify
+# it (currently just prod — see envs/prod/main.tf).
+variable "create_read_replica" {
+  type    = bool
+  default = false
+}
+variable "replica_instance_class" {
+  description = "Defaults to var.instance_class when unset — a reporting replica rarely needs to be bigger than the primary."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   type    = map(string)
   default = {}
