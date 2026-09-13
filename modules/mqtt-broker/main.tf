@@ -18,13 +18,26 @@ terraform {
 locals {
   name = "smart-pet-${var.environment}-mqtt"
   tls  = var.certificate_arn != ""
+  # Abuse-prevention limits (hardening Phase 20, A10). Mosquitto has no native
+  # per-client message-rate / connection-rate limiter (that's an EMQX-only
+  # capability the hardening plan names) — deferred pending an actual flooding
+  # incident, since a broker migration is a real cost/complexity jump the
+  # fleet's current scale doesn't justify. What Mosquitto DOES enforce natively
+  # is applied here: a per-listener connection ceiling, a max packet size (device
+  # payloads are small JSON), a keepalive ceiling (stops a client stalling dead-
+  # client detection), and a per-client outgoing queue cap that already
+  # disconnects + logs on breach — the log_metric_filter/alarm below catches that.
   conf = <<-EOT
     listener 1883
     ${var.dev_allow_anonymous ? "allow_anonymous true" : "allow_anonymous false"}
+    max_connections ${var.max_connections}
     persistence true
     persistence_location /mosquitto/data/
     autosave_interval 60
     max_inflight_messages 200
+    max_queued_messages ${var.max_queued_messages}
+    message_size_limit ${var.message_size_limit}
+    max_keepalive ${var.max_keepalive}
     log_dest stdout
     log_type warning
     log_type notice
@@ -251,6 +264,38 @@ resource "aws_ecs_service" "this" {
   }
   depends_on = [aws_efs_mount_target.this, aws_lb_listener.plain]
   tags       = var.tags
+}
+
+# Mosquitto logs a warning and disconnects the client when a per-client limit
+# above is breached ("dropped message", "exceeded", queue/connection denials).
+# Count those lines and alarm on a burst — the broker-level equivalent of the
+# backend's own rate-limit signal.
+resource "aws_cloudwatch_log_metric_filter" "client_limit_breach" {
+  name           = "${local.name}-client-limit-breach"
+  log_group_name = aws_cloudwatch_log_group.this.name
+  pattern        = "?dropped ?exceeded ?denied"
+
+  metric_transformation {
+    name          = "MqttClientLimitBreach"
+    namespace     = "SmartPet/${var.environment}"
+    value         = "1"
+    default_value = 0
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "client_limit_breach" {
+  count               = var.alarm_topic_arn != "" ? 1 : 0
+  alarm_name          = "${local.name}-client-limit-breach"
+  namespace           = "SmartPet/${var.environment}"
+  metric_name         = "MqttClientLimitBreach"
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 20
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.alarm_topic_arn]
+  tags                = var.tags
 }
 
 output "nlb_dns_name" { value = aws_lb.this.dns_name }

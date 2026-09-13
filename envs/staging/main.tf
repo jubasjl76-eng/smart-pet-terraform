@@ -197,6 +197,7 @@ module "mqtt_broker" {
   image               = var.broker_image
   desired_count       = 1
   dev_allow_anonymous = false
+  alarm_topic_arn     = module.observability.sns_topic_arn
   tags                = local.tags
 }
 
