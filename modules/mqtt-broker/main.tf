@@ -305,6 +305,14 @@ resource "aws_ecs_service" "this" {
 
   health_check_grace_period_seconds = 60
 
+  # ECS deploy safety (Phase 21, A11) — auto-rollback if a new revision
+  # never reaches steady state. Matters more now that task-def changes here
+  # actually deploy (see the ignore_changes note below).
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   # No ignore_changes here (unlike modules/ecs-service, where it's needed
   # because a separate CI deploy pipeline registers new task defs with a
   # fresh image tag): this module's image is a plain terraform variable

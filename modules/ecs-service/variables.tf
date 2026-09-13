@@ -74,6 +74,15 @@ variable "cpu_target" {
   type    = number
   default = 60
 }
+variable "alb_arn_suffix" {
+  description = "For the request-count-per-target autoscaling policy's resource_label."
+  type        = string
+}
+variable "request_count_target" {
+  description = "Target ALB requests per target per minute for the request-count autoscaling policy (Phase 21, A11 — CPU alone misses an I/O-bound service)."
+  type        = number
+  default     = 1000
+}
 
 variable "log_retention_days" {
   type    = number
