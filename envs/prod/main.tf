@@ -277,7 +277,9 @@ module "cdn_assets" {
   environment = local.environment
   spa         = false
   price_class = "PriceClass_200"
-  tags        = local.tags
+  # firmware/<type>/<version>/ is immutable once written (Phase 21, A11).
+  long_cache_paths = ["firmware/*"]
+  tags             = local.tags
 }
 
 module "cdn_dashboard" {

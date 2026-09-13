@@ -248,7 +248,10 @@ module "cdn_assets" {
   name        = "assets" # hls/ firmware/ snapshots/ buyer-photos/
   environment = local.environment
   spa         = false
-  tags        = local.tags
+  # firmware/<type>/<version>/ is immutable once written (Phase 21, A11) —
+  # long TTL there; everything else in this bucket keeps the module default.
+  long_cache_paths = ["firmware/*"]
+  tags             = local.tags
 }
 
 module "cdn_dashboard" {
