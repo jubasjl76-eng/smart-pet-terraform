@@ -30,6 +30,21 @@ variable "default_ttl" {
   type    = number
   default = 3600
 }
+# Immutable per-version paths (Phase 21, A11 — OTA CDN hardening): content at
+# one of these path patterns never changes once written (e.g. firmware's
+# `<type>/<version>/` layout — a new version gets a new path, never an
+# overwrite), so it can be cached far longer than this distribution's
+# general-purpose default_ttl without any staleness risk. Costs nothing extra
+# (fewer origin fetches, if anything) — unlike default_ttl this needs no
+# per-env cost tradeoff, so every env can enable it uniformly.
+variable "long_cache_paths" {
+  type    = list(string)
+  default = []
+}
+variable "long_cache_ttl" {
+  type    = number
+  default = 31536000 # 1 year
+}
 variable "aliases" {
   type    = list(string)
   default = []
@@ -106,6 +121,27 @@ resource "aws_cloudfront_distribution" "this" {
       query_string = false
       cookies {
         forward = "none"
+      }
+    }
+  }
+
+  dynamic "ordered_cache_behavior" {
+    for_each = var.long_cache_paths
+    content {
+      path_pattern           = ordered_cache_behavior.value
+      target_origin_id       = "s3"
+      viewer_protocol_policy = "redirect-to-https"
+      allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+      cached_methods         = ["GET", "HEAD"]
+      compress               = true
+      min_ttl                = var.long_cache_ttl
+      default_ttl            = var.long_cache_ttl
+      max_ttl                = var.long_cache_ttl
+      forwarded_values {
+        query_string = false
+        cookies {
+          forward = "none"
+        }
       }
     }
   }
