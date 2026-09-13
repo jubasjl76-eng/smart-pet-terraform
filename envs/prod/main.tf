@@ -170,6 +170,7 @@ module "backend" {
   vpc_id                = module.network.vpc_id
   private_subnet_ids    = module.network.private_subnet_ids
   alb_security_group_id = module.alb.security_group_id
+  alb_arn_suffix        = module.alb.alb_arn_suffix
   alb_listener_arn      = module.alb.listener_arn
   listener_priority     = 100
   health_check_path     = "/ready"
@@ -241,6 +242,7 @@ module "sensors" {
   vpc_id                = module.network.vpc_id
   private_subnet_ids    = module.network.private_subnet_ids
   alb_security_group_id = module.alb.security_group_id
+  alb_arn_suffix        = module.alb.alb_arn_suffix
   alb_listener_arn      = module.alb.listener_arn
   listener_priority     = 50 # more specific than the backend's catch-all at 100
   path_patterns         = ["/api/sensors*", "/api/alerts*"]

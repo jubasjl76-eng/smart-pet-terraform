@@ -1,6 +1,21 @@
 # ecs-service — REUSABLE. One Fargate service behind a shared ALB listener:
 # task definition, task role, service SG, target group + listener rule, logs,
-# and CPU target-tracking autoscaling when max_count > min_count.
+# and CPU + request-count target-tracking autoscaling when max_count > min_count.
+#
+# ECS deploy safety (Phase 21, A11):
+#  - ≥2-AZ task spread: already structural, not a setting here — `modules/network`
+#    always creates 2 AZs' worth of private subnets, and Fargate (awsvpc mode)
+#    balances a service's tasks across whatever subnets it's given; Fargate has
+#    no `ordered_placement_strategy`/`placement_constraints` (EC2-launch-type-only)
+#    for this to be configured explicitly even if we wanted to.
+#  - minimumHealthyPercent/maximumPercent (100/200, zero-downtime rolling deploys)
+#    and the deployment circuit breaker (auto-rollback) are on `aws_ecs_service.this`.
+#  - Scoped OUT: a custom MQTT-ingest-lag autoscaling metric. Nothing publishes
+#    prom-client metrics to CloudWatch today (Phase 16's Grafana Cloud
+#    dashboards-as-code is still the pending piece) — building a CloudWatch
+#    custom-metric pipeline just to feed one autoscaling policy would be
+#    infrastructure ahead of the observability foundation it should sit on.
+#    Revisit once that pipeline exists.
 
 terraform {
   required_version = ">= 1.6"
@@ -171,6 +186,15 @@ resource "aws_ecs_service" "this" {
   deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
 
+  # ECS deploy safety (Phase 21, A11): auto-rollback if the new task
+  # definition never reaches steady state (fails its health check, crash-
+  # loops) — CI's `deploy.yml` no longer has to notice that on its own
+  # before the bad revision keeps serving traffic.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   lifecycle {
     ignore_changes = [task_definition] # CI deploys new task defs; TF owns everything else
   }
@@ -201,6 +225,30 @@ resource "aws_appautoscaling_policy" "cpu" {
       predefined_metric_type = "ECSServiceAverageCPUUtilization"
     }
     target_value       = var.cpu_target
+    scale_in_cooldown  = 120
+    scale_out_cooldown = 60
+  }
+}
+
+# Request-count-per-target (Phase 21, A11): CPU alone misses an I/O-bound
+# service sitting mostly idle on DB/MQTT/HTTP round-trips while its request
+# queue still grows — this scales on the actual load ECS's target group
+# already tracks. Coexists with the CPU policy above; ECS scales out on
+# whichever policy wants more capacity, in on whichever needs it least.
+resource "aws_appautoscaling_policy" "request_count" {
+  count              = var.max_count > var.min_count ? 1 : 0
+  name               = "${local.full}-request-count"
+  policy_type        = "TargetTrackingScaling"
+  service_namespace  = aws_appautoscaling_target.this[0].service_namespace
+  resource_id        = aws_appautoscaling_target.this[0].resource_id
+  scalable_dimension = aws_appautoscaling_target.this[0].scalable_dimension
+
+  target_tracking_scaling_policy_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ALBRequestCountPerTarget"
+      resource_label         = "${var.alb_arn_suffix}/${aws_lb_target_group.this.arn_suffix}"
+    }
+    target_value       = var.request_count_target
     scale_in_cooldown  = 120
     scale_out_cooldown = 60
   }
