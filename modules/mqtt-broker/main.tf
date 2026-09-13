@@ -1,9 +1,30 @@
 # mqtt-broker — Mosquitto on Fargate behind a Network Load Balancer. EFS holds
-# the config + retained-message store so a task replacement keeps state.
-# TLS :8883 when a cert is given; plain :1883 always.
+# the config + a per-task persistence subdirectory. TLS :8883 when a cert is
+# given; plain :1883 always.
 #
 # dev runs `eclipse-mosquitto:2` with allow_anonymous. prod must swap `image`
 # for one with an auth backend (dynamic-security or a plugin the backend feeds).
+#
+# HA (Phase 21, A11 — "EMQX cluster depth"): the plan names EMQX's clustering
+# (shared session + retained state across nodes, split-brain policy) — the
+# broker actually deployed is Mosquitto, which has no clustering protocol at
+# all; N Mosquitto tasks behind this NLB are N fully independent replicas,
+# not a cluster, so there's no shared distributed state to split-brain over
+# in the first place. A real clustered/RocksDB retained store is an
+# EMQX-only capability — same cost/complexity deferral as Phase 20's broker
+# limits, still not justified at this fleet's scale. What IS a genuine,
+# broker-agnostic fix, done here: each task previously wrote its persistence
+# file to the SAME shared EFS mount (`persistence_location` was a static
+# path) while prod already runs `desired_count = 2` — two Mosquitto
+# processes concurrently appending the same file is a real corruption risk,
+# not a feature. Each task now gets its own subdirectory (keyed by its ENI's
+# private IP, unique per Fargate task) — independent replicas with locally
+# durable state instead of a shared file two processes were never meant to
+# write together. Losing a client's server-side session/retained state on
+# failover to a different task is the accepted degradation the plan itself
+# names for "broker down": devices journal locally and replay on reconnect,
+# and the backend now drops out-of-order replays by timestamp (`applyStatus`
+# in `smart-pet-backend`, migration `017_device_status_ordering.sql`).
 
 terraform {
   required_version = ">= 1.6"
@@ -27,12 +48,13 @@ locals {
   # payloads are small JSON), a keepalive ceiling (stops a client stalling dead-
   # client detection), and a per-client outgoing queue cap that already
   # disconnects + logs on breach — the log_metric_filter/alarm below catches that.
+  # persistence_location is appended by config-init at container start (a
+  # per-task subdirectory — see the module header comment); not set here.
   conf = <<-EOT
     listener 1883
     ${var.dev_allow_anonymous ? "allow_anonymous true" : "allow_anonymous false"}
     max_connections ${var.max_connections}
     persistence true
-    persistence_location /mosquitto/data/
     autosave_interval 60
     max_inflight_messages 200
     max_queued_messages ${var.max_queued_messages}
@@ -41,6 +63,13 @@ locals {
     log_dest stdout
     log_type warning
     log_type notice
+
+    # Loopback-only, anonymous — never reachable off-box (the security groups
+    # only ever open 1883/8883). Exists so the ECS container healthcheck below
+    # can prove the broker is actually processing MQTT, not just holding the
+    # port open, even in prod where the main listener requires auth.
+    listener 18883 127.0.0.1
+    allow_anonymous true
   EOT
 }
 
@@ -200,7 +229,12 @@ resource "aws_ecs_task_definition" "this" {
       image      = "busybox:1.36"
       essential  = false
       entryPoint = ["sh", "-c"]
-      command    = ["mkdir -p /mosquitto/config /mosquitto/data && printf '%s' \"$CONF\" > /mosquitto/config/mosquitto.conf"]
+      # This task's own private IP (unique per Fargate task/ENI) keys its
+      # persistence subdirectory — see the module header comment on why that
+      # replaced one persistence file shared across replicas.
+      command = [
+        "mkdir -p /mosquitto/config /mosquitto/data && printf '%s' \"$CONF\" > /mosquitto/config/mosquitto.conf && DIR=/mosquitto/data/$(hostname -i) && mkdir -p \"$DIR\" && printf 'persistence_location %s/\\n' \"$DIR\" >> /mosquitto/config/mosquitto.conf"
+      ]
       environment = [
         { name = "CONF", value = local.conf }
       ]
@@ -224,6 +258,18 @@ resource "aws_ecs_task_definition" "this" {
       dependsOn = [
         { containerName = "config-init", condition = "COMPLETE" }
       ]
+      # NLB's own health check only proves the TCP port accepts a handshake —
+      # not that Mosquitto is actually processing MQTT (a wedged-but-listening
+      # process would still pass it). A real pub round-trip on the loopback
+      # listener catches that; ECS restarts the task on repeated failure,
+      # independent of (and stricter than) the NLB check.
+      healthCheck = {
+        command     = ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 18883 -t healthcheck -m ok -q 0 -i healthcheck -W 3 || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 15
+      }
       mountPoints = [{ sourceVolume = "mosquitto", containerPath = "/mosquitto" }]
       logConfiguration = {
         logDriver = "awslogs"
@@ -259,9 +305,12 @@ resource "aws_ecs_service" "this" {
 
   health_check_grace_period_seconds = 60
 
-  lifecycle {
-    ignore_changes = [task_definition]
-  }
+  # No ignore_changes here (unlike modules/ecs-service, where it's needed
+  # because a separate CI deploy pipeline registers new task defs with a
+  # fresh image tag): this module's image is a plain terraform variable
+  # (`var.image`/`var.broker_image`), nothing else ever touches this task
+  # definition, so ignoring it would just mean this PR's own healthcheck +
+  # persistence-path changes silently never reach the running service.
   depends_on = [aws_efs_mount_target.this, aws_lb_listener.plain]
   tags       = var.tags
 }
