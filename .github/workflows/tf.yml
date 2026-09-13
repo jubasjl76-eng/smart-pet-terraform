@@ -3,6 +3,11 @@ name: tf
 # plan on PR, apply on push to main. Uses GitHub → AWS OIDC (no static keys):
 # set the repo variables AWS_ROLE_ARN (module.oidc.gha_terraform_role_arn) and
 # AWS_REGION after the first bootstrap + apply. Until then this self-skips.
+#
+# AWS-only — envs/cloudflare (Phase 21, A11) has a different provider and
+# credential entirely (CLOUDFLARE_API_TOKEN) and applies manually until the
+# operator sets that up (OPERATOR-ACTIONS.md H1); it's fmt/validate-only in
+# ci.yml's matrix, not part of this apply pipeline.
 
 on:
   pull_request:
