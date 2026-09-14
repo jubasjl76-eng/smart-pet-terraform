@@ -159,9 +159,14 @@ module "backend" {
     REDIS_URL        = module.cache.redis_url
   }
   secret_refs = {
-    JWT_SECRET  = "${module.secrets.app_secret_arn}:JWT_SECRET::"
-    PG_USER     = "${module.database.master_user_secret_arn}:username::"
-    PG_PASSWORD = "${module.database.master_user_secret_arn}:password::"
+    JWT_SECRET = "${module.secrets.app_secret_arn}:JWT_SECRET::"
+    # Rotation grace window (Phase 21, A12 #20) — the app secret's JSON blob
+    # must include this key (empty string when no rotation is active) or
+    # the task fails to start; ECS's secrets resolution errors on a missing
+    # JSON key, not just an empty one. See runbooks/key-rotation.md.
+    JWT_SECRET_PREVIOUS = "${module.secrets.app_secret_arn}:JWT_SECRET_PREVIOUS::"
+    PG_USER             = "${module.database.master_user_secret_arn}:username::"
+    PG_PASSWORD         = "${module.database.master_user_secret_arn}:password::"
   }
 
   tags = local.tags
