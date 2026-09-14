@@ -223,9 +223,11 @@ module "backend" {
     REDIS_URL        = module.cache.redis_url
   }
   secret_refs = {
-    JWT_SECRET  = "${module.secrets.app_secret_arn}:JWT_SECRET::"
-    PG_USER     = "${module.database.master_user_secret_arn}:username::"
-    PG_PASSWORD = "${module.database.master_user_secret_arn}:password::"
+    JWT_SECRET = "${module.secrets.app_secret_arn}:JWT_SECRET::"
+    # Rotation grace window (Phase 21, A12 #20) — see envs/dev's comment.
+    JWT_SECRET_PREVIOUS = "${module.secrets.app_secret_arn}:JWT_SECRET_PREVIOUS::"
+    PG_USER             = "${module.database.master_user_secret_arn}:username::"
+    PG_PASSWORD         = "${module.database.master_user_secret_arn}:password::"
   }
 
   tags = local.tags
